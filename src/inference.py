@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 from pathlib import Path
 
@@ -16,12 +17,19 @@ import torch
 from PIL import Image
 
 
-def load_models(device: str = "cpu"):
-    """Load HMR 2.0 model and detector."""
+def load_detector():
+    """Load YOLOv8 detector (lightweight alternative to ViTDet)."""
+    from ultralytics import YOLO
+
+    # YOLOv8n is the nano model - very lightweight (~6MB)
+    # Use 'yolov8s.pt' for better accuracy or 'yolov8n.pt' for speed
+    detector = YOLO("yolov8n.pt")
+    return detector
+
+
+def load_hmr2_model(device: str = "cpu"):
+    """Load HMR 2.0 model separately from detector."""
     from hmr2.models import load_hmr2, download_models
-    from hmr2.utils.utils_detectron2 import DefaultPredictor_Lazy
-    from detectron2.config import LazyConfig
-    import hmr2
 
     # Download model checkpoints if needed
     download_models()
@@ -31,29 +39,23 @@ def load_models(device: str = "cpu"):
     model = model.to(device)
     model.eval()
 
-    # Load ViTDet detector
-    cfg_path = Path(hmr2.__file__).parent / "configs" / "cascade_mask_rcnn_vitdet_h_75ep.py"
-    detectron2_cfg = LazyConfig.load(str(cfg_path))
-    detectron2_cfg.train.init_checkpoint = "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/cascade_mask_rcnn_vitdet_h/f328730692/model_final_f05665.pkl"
-
-    for i in range(3):
-        detectron2_cfg.model.roi_heads.box_predictors[i].test_score_thresh = 0.25
-
-    detector = DefaultPredictor_Lazy(detectron2_cfg)
-
-    return model, model_cfg, detector
+    return model, model_cfg
 
 
 def detect_humans(image: np.ndarray, detector, threshold: float = 0.5):
-    """Detect humans in image and return bounding boxes."""
-    det_out = detector(image)
-    det_instances = det_out["instances"]
+    """Detect humans in image using YOLOv8 and return bounding boxes."""
+    # Run YOLO detection
+    results = detector(image, classes=[0], verbose=False)  # class 0 = person
 
-    # Filter for person class (class 0) with sufficient confidence
-    valid_idx = (det_instances.pred_classes == 0) & (det_instances.scores > threshold)
-    boxes = det_instances.pred_boxes.tensor[valid_idx].cpu().numpy()
+    boxes = []
+    for result in results:
+        for box in result.boxes:
+            if box.conf.item() > threshold:
+                # Get xyxy format bounding box
+                xyxy = box.xyxy[0].cpu().numpy()
+                boxes.append(xyxy)
 
-    return boxes
+    return np.array(boxes) if boxes else np.array([]).reshape(0, 4)
 
 
 def run_hmr2(image: np.ndarray, boxes: np.ndarray, model, model_cfg, device: str = "cpu"):
@@ -115,21 +117,17 @@ def cam_to_full_translation(pred_cam, box_center, box_size, img_size, focal_leng
 
 
 def render_results(image: np.ndarray, results: list, model_cfg, output_dir: Path,
-                   image_name: str, save_mesh: bool = False, side_view: bool = True):
+                   image_name: str, save_mesh: bool = False, side_view: bool = True,
+                   smpl_faces: np.ndarray = None):
     """Render mesh overlay on image."""
     from hmr2.utils.renderer import Renderer
 
     img_h, img_w = image.shape[:2]
     focal_length = model_cfg.EXTRA.FOCAL_LENGTH / model_cfg.MODEL.IMAGE_SIZE * max(img_h, img_w)
 
-    # Initialize renderer
-    renderer = Renderer(model_cfg, faces=None)
-
-    # Get SMPL faces
-    from hmr2.models import SMPL
-    smpl = SMPL()
-    faces = smpl.faces
-    renderer.faces = faces
+    # Initialize renderer with pre-loaded SMPL faces
+    renderer = Renderer(model_cfg, faces=smpl_faces)
+    faces = smpl_faces
 
     # Render all detected people
     all_verts = []
@@ -231,11 +229,18 @@ def process_image(image_path: str, output_dir: str, save_mesh: bool = False,
     if image is None:
         raise ValueError(f"Could not load image: {image_path}")
 
-    print("Loading models...")
-    model, model_cfg, detector = load_models(device)
+    # Stage 1: Detection with lightweight YOLOv8
+    print("Loading YOLOv8 detector...")
+    detector = load_detector()
 
     print("Detecting humans...")
     boxes = detect_humans(image, detector)
+
+    # Free detector memory before loading HMR2.0
+    del detector
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     if len(boxes) == 0:
         print("No humans detected in the image.")
@@ -243,11 +248,24 @@ def process_image(image_path: str, output_dir: str, save_mesh: bool = False,
 
     print(f"Found {len(boxes)} person(s)")
 
+    # Stage 2: HMR2.0 inference (loaded after detector is freed)
+    print("Loading HMR 2.0 model...")
+    model, model_cfg = load_hmr2_model(device)
+
     print("Running HMR 2.0...")
     results = run_hmr2(image, boxes, model, model_cfg, device)
 
+    # Extract SMPL faces before freeing model
+    smpl_faces = model.smpl.faces.copy()
+
+    # Free HMR2.0 model memory before rendering
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     print("Rendering results...")
-    render_results(image, results, model_cfg, output_dir, image_name, save_mesh, side_view)
+    render_results(image, results, model_cfg, output_dir, image_name, save_mesh, side_view, smpl_faces)
 
     print("Saving parameters...")
     save_params(results, output_dir, image_name)
