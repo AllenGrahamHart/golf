@@ -58,10 +58,25 @@ The pose parameter $\boldsymbol{\theta}$ consists of 23 rotation matrices $\{R_i
 A golf swing, captured as a sequence of frames, becomes a smooth curve:
 
 \begin{equation}
-    \gamma: [0, T] \rightarrow SO(3)^{23}
+    \gamma: [T_0, T_1] \rightarrow SO(3)^{23}
 \end{equation}
 
-This geometric perspective enables us to leverage tools from Riemannian geometry and Lie group theory for swing analysis---computing geodesic distances between poses, analyzing angular velocities, and identifying key swing phases. We can easily align 2 different swings in time by aligning the time of contact with the ball. 
+with $T_0 < 0 < T_1$ and $t=0$ the moment of ball contact. This geometric perspective enables us to leverage tools from Riemannian geometry and Lie group theory for swing analysis---computing geodesic distances between poses, analyzing angular velocities, and identifying key swing phases.
+
+\subsection{Swing Alignment and Normalization}
+
+We focus on the \textbf{drive} (full swing), as it has the most consistent and analyzable structure. To enable comparison across golfers, we apply two forms of normalization:
+
+\textbf{Temporal alignment.} We define:
+\begin{itemize}[noitemsep]
+    \item $T_0$ = top of backswing (detected as the reversal point in shoulder/hip rotation)
+    \item $t = 0$ = moment of ball contact
+    \item $T_1$ = finish position (motion stops)
+\end{itemize}
+
+\textbf{Spatial normalization.} The SMPL body pose representation is already well-suited for comparison: each $R_i \in SO(3)$ is a \emph{relative} rotation with respect to the parent joint. This means two golfers of different heights with identical swing mechanics will have the same body pose values---body shape differences are factored into separate shape parameters $\boldsymbol{\beta}$, not the pose.
+
+\textbf{Fixed-frame resampling.} Swing faults are fundamentally \emph{geometric}---they concern the shape of the curve through $SO(3)^{23}$, not the speed at which it is traversed. A fast swing and a slow swing with identical body positions should receive the same feedback. We therefore resample all swings to a fixed number of frames $N$ (e.g., $N=30$), yielding a tensor of shape $(N, 23, 3, 3)$ regardless of original tempo.
 
 \subsection{Swing Classification}
 
