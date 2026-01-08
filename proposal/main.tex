@@ -1,0 +1,84 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{enumitem}
+
+\title{\textbf{AI Golf Coach: Automated Swing Analysis\\Using 3D Human Pose Estimation}}
+\author{Allen Graham Hart}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Executive Summary}
+
+We propose to develop a proof-of-concept AI golf coach that provides automated, personalized feedback on golf swings. The system captures video of a golfer's swing, reconstructs a dynamic 3D model of the body, and classifies the swing to generate targeted coaching advice. This 12-week project will demonstrate the technical feasibility of using geometric deep learning on human pose data for sports coaching applications.
+
+\section{Problem Statement}
+
+Golf instruction traditionally requires expensive one-on-one sessions with professional coaches. While video analysis apps exist, they rely on 2D landmark detection and lack the geometric understanding needed for precise biomechanical feedback. Golfers need accessible, accurate, and actionable coaching that understands their swing in three dimensions.
+
+\section{Technical Approach}
+
+\subsection{3D Human Pose Estimation}
+
+We employ HMR 2.0 (Human Mesh Recovery) to extract the SMPL body model from video frames.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/swing.jpg}
+        \caption{Input image}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/swing_render.png}
+        \caption{Reconstructed 3D mesh overlay}
+    \end{subfigure}
+    \caption{Our pipeline extracts a 3D human mesh from a single image, enabling geometric analysis of body pose.}
+    \label{fig:pipeline}
+\end{figure}
+
+\subsection{Geometric Representation of Pose}
+
+The pose parameter $\boldsymbol{\theta}$ consists of 23 rotation matrices $\{R_i\}_{i=1}^{23}$, where each $R_i \in SO(3)$ represents the relative rotation of joint $i$ with respect to its parent in the kinematic tree. A complete body pose is thus an element of the product manifold:
+
+\begin{equation}
+    \boldsymbol{\theta} \in SO(3)^{23}
+\end{equation}
+
+A golf swing, captured as a sequence of frames, becomes a smooth curve:
+
+\begin{equation}
+    \gamma: [0, T] \rightarrow SO(3)^{23}
+\end{equation}
+
+This geometric perspective enables us to leverage tools from Riemannian geometry and Lie group theory for swing analysis---computing geodesic distances between poses, analyzing angular velocities, and identifying key swing phases. We can easily align 2 different swings in time by aligning the time of contact with the ball. 
+
+\subsection{Swing Classification}
+
+Our goal is to train a classifier $f: \mathcal{C} \rightarrow \mathcal{Y}$ that maps swing curves $\mathcal{C}$ to feedback categories $\mathcal{Y}$. Categories may include:
+
+\begin{itemize}[noitemsep]
+    \item Swing plane deviations (over-the-top, too flat)
+    \item Hip rotation timing (early extension, restricted turn)
+    \item Weight transfer patterns (reverse pivot, sway)
+    \item Arm/wrist mechanics (casting, flipping)
+\end{itemize}
+
+The classifier will be developed through:
+\begin{enumerate}[noitemsep]
+    \item \textbf{Data collection}: Gathering labeled swing videos with expert annotations
+    \item \textbf{Prior incorporation}: Encoding biomechanical rules from golf instruction literature
+    \item \textbf{Expert collaboration}: Iterative refinement with PGA-certified instructors
+\end{enumerate}
+
+\end{document}
