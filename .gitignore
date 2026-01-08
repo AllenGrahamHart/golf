@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# SMPL model files (require license)
+data/smpl/*
+!data/smpl/.gitkeep
+
+# Output files
+output/*
+!output/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model checkpoints (auto-downloaded)
+*.ckpt
+*.pth
