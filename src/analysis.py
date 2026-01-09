@@ -83,7 +83,7 @@ def smooth_signal(signal: np.ndarray, window: int = 7, polyorder: int = 2) -> np
 
 
 def plot_elbow_angles(params_path: str, fps: float = 30.0, save_path: str = None,
-                      smooth_window: int = 7):
+                      smooth_window: int = 7, impact_time: float = None):
     """Plot left and right elbow angles over time with raw scatter and smoothed curves.
 
     Args:
@@ -91,17 +91,26 @@ def plot_elbow_angles(params_path: str, fps: float = 30.0, save_path: str = None
         fps: Frames per second (for time axis)
         save_path: If provided, save the plot to this path
         smooth_window: Window size for Savitzky-Golay smoothing
+        impact_time: Time of ball impact in seconds (becomes t=0 on the plot)
     """
     angles = extract_elbow_angles(params_path)
 
     # Convert frames to time
     time = angles['frames'] / fps
 
+    # Shift time so impact_time becomes t=0
+    if impact_time is not None:
+        time = time - impact_time
+
     # Smooth the signals
     left_smooth = smooth_signal(angles['left'], window=smooth_window)
     right_smooth = smooth_signal(angles['right'], window=smooth_window)
 
     fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Plot vertical line at impact (t=0) if impact_time was specified
+    if impact_time is not None:
+        ax.axvline(x=0, color='gray', linestyle='--', linewidth=1.5, label='Impact')
 
     # Plot raw data as scatter (semi-transparent)
     ax.scatter(time, angles['left'], c='blue', alpha=0.3, s=30, label='Left (raw)')
@@ -142,10 +151,12 @@ if __name__ == "__main__":
     parser.add_argument("--params", required=True, help="Path to params.npz file")
     parser.add_argument("--fps", type=float, default=30.0, help="Video FPS")
     parser.add_argument("--save", help="Path to save plot")
+    parser.add_argument("--impact-time", type=float, help="Time of ball impact in seconds (becomes t=0)")
 
     args = parser.parse_args()
 
-    angles = plot_elbow_angles(args.params, fps=args.fps, save_path=args.save)
+    angles = plot_elbow_angles(args.params, fps=args.fps, save_path=args.save,
+                               impact_time=args.impact_time)
 
     print(f"\nElbow angle statistics:")
     print(f"  Left:  min={angles['left'].min():.1f}°, max={angles['left'].max():.1f}°")

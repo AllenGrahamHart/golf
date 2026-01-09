@@ -9,7 +9,7 @@
 \usepackage{enumitem}
 
 \title{\textbf{AI Golf Coach: Automated Swing Analysis\\Using 3D Human Pose Estimation}}
-\author{Allen Graham Hart}
+\author{Allen Hart, Tom Montenegro-Johnson}
 \date{}
 
 \begin{document}
@@ -45,6 +45,54 @@ We employ HMR 2.0 (Human Mesh Recovery) to extract the SMPL body model from vide
     \end{subfigure}
     \caption{Our pipeline extracts a 3D human mesh from a single image, enabling geometric analysis of body pose.}
     \label{fig:pipeline}
+\end{figure}
+
+\subsubsection{Video Processing and Biomechanical Analysis}
+
+We have extended our pipeline to process video sequences, enabling temporal analysis of the golf swing. Figure~\ref{fig:swing_sequence} shows five frames extracted from a recorded swing, capturing the key phases from top of backswing through finish.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{0.18\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/frame_1.png}
+        \caption{}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.18\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/frame_2.png}
+        \caption{}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.18\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/frame_3.png}
+        \caption{}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.18\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/frame_4.png}
+        \caption{}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.18\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/frame_5.png}
+        \caption{}
+    \end{subfigure}
+    \caption{Key phases of a golf swing from top of backswing through finish (33 frames at 30 fps).}
+    \label{fig:swing_sequence}
+\end{figure}
+
+From each frame, we extract the SMPL body model and compute joint angles. Figure~\ref{fig:elbow_angles} demonstrates our ability to track biomechanical parameters over time, showing the left and right elbow bend angles throughout the swing. The smooth curves indicate reliable pose estimation, and the characteristic patterns---left arm extending while the right arm bends through impact---align with established golf biomechanics.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/elbow_angles.png}
+    \caption{Elbow angles extracted from video analysis. Raw measurements (dots) and Savitzky-Golay smoothed curves show consistent tracking of arm mechanics through the swing.}
+    \label{fig:elbow_angles}
 \end{figure}
 
 \subsection{Geometric Representation of Pose}
