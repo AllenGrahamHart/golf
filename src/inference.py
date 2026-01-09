@@ -4,17 +4,20 @@ HMR 2.0 inference wrapper for golf swing analysis.
 Usage:
     python -m src.inference --image input/swing.jpg --output output/
     python -m src.inference --image input/swing.jpg --output output/ --save_mesh
+    python -m src.inference --video input/swing.mp4 --output output/
 """
 
 import argparse
 import gc
 import os
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image
+from tqdm import tqdm
 
 
 def load_detector():
@@ -213,6 +216,148 @@ def save_params(results: list, output_dir: Path, image_name: str):
     return param_path
 
 
+# =============================================================================
+# Video Processing Functions
+# =============================================================================
+
+
+def extract_frames(video_path: str) -> Tuple[List[np.ndarray], float]:
+    """Extract all frames from a video file.
+
+    Returns:
+        frames: List of BGR images (numpy arrays)
+        fps: Original video framerate
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frames = []
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+
+    cap.release()
+    print(f"Extracted {len(frames)} frames at {fps:.2f} fps")
+    return frames, fps
+
+
+def frames_to_video(frames: List[np.ndarray], output_path: str, fps: float):
+    """Reassemble frames into a video file."""
+    if not frames:
+        raise ValueError("No frames to write")
+
+    h, w = frames[0].shape[:2]
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+
+    for frame in frames:
+        # Convert RGB to BGR if needed (our renders are RGB)
+        if len(frame.shape) == 3 and frame.shape[2] == 3:
+            writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        else:
+            writer.write(frame)
+
+    writer.release()
+    print(f"Saved video: {output_path}")
+
+
+def save_video_params(all_results: List[List[dict]], output_dir: Path, video_name: str):
+    """Save SMPL parameters for all frames to a single npz file.
+
+    Shape convention: (T, N, ...) where T=frames, N=people per frame
+    For golf, N=1 typically.
+    """
+    # Assuming single person per frame for golf
+    # Each frame's results is a list with one dict
+    params = {
+        "body_pose": np.stack([r[0]["smpl_params"]["body_pose"] for r in all_results]),
+        "betas": np.stack([r[0]["smpl_params"]["betas"] for r in all_results]),
+        "global_orient": np.stack([r[0]["smpl_params"]["global_orient"] for r in all_results]),
+        "cam_t": np.stack([r[0]["cam_t"] for r in all_results]),
+        "boxes": np.stack([r[0]["box"] for r in all_results]),
+    }
+
+    param_path = output_dir / f"{video_name}_params.npz"
+    np.savez(param_path, **params)
+    print(f"Saved video SMPL parameters: {param_path} (shape: {params['body_pose'].shape[0]} frames)")
+
+    return param_path
+
+
+def process_video(video_path: str, output_dir: str, device: str = "cpu"):
+    """Process a video through the HMR 2.0 pipeline (parameters only, no rendering).
+
+    Pipeline:
+        1. Extract all frames
+        2. Run detection on all frames
+        3. Run HMR2 on all frames
+        4. Save parameters
+    """
+    video_path = Path(video_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    video_name = video_path.stem
+
+    print(f"Processing video: {video_path}")
+
+    # Step 1: Extract frames
+    print("\n[1/4] Extracting frames...")
+    frames, fps = extract_frames(str(video_path))
+
+    if len(frames) == 0:
+        raise ValueError("No frames extracted from video")
+
+    # Step 2: Detection on all frames
+    print("\n[2/4] Running detection on all frames...")
+    detector = load_detector()
+
+    all_boxes = []
+    for frame in tqdm(frames, desc="Detecting"):
+        boxes = detect_humans(frame, detector)
+        if len(boxes) == 0:
+            print(f"Warning: No person detected in frame {len(all_boxes)}")
+            # Use previous box if available, otherwise raise error
+            if all_boxes:
+                boxes = all_boxes[-1]
+            else:
+                raise ValueError("No person detected in first frame")
+        all_boxes.append(boxes)
+
+    # Free detector memory
+    del detector
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Step 3: HMR2 inference on all frames
+    print("\n[3/4] Running HMR 2.0 on all frames...")
+    model, model_cfg = load_hmr2_model(device)
+
+    all_results = []
+    for i, (frame, boxes) in enumerate(tqdm(zip(frames, all_boxes), total=len(frames), desc="HMR2")):
+        results = run_hmr2(frame, boxes, model, model_cfg, device)
+        all_results.append(results)
+
+    # Free HMR2 model memory
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Step 4: Save parameters
+    print("\n[4/4] Saving parameters...")
+    save_video_params(all_results, output_dir, video_name)
+
+    print("\nDone!")
+    return all_results
+
+
 def process_image(image_path: str, output_dir: str, save_mesh: bool = False,
                   side_view: bool = True, device: str = "cpu"):
     """Process a single image through the HMR 2.0 pipeline."""
@@ -276,21 +421,35 @@ def process_image(image_path: str, output_dir: str, save_mesh: bool = False,
 
 def main():
     parser = argparse.ArgumentParser(description="HMR 2.0 inference for golf swing analysis")
-    parser.add_argument("--image", required=True, help="Path to input image")
+    parser.add_argument("--image", help="Path to input image")
+    parser.add_argument("--video", help="Path to input video (extracts SMPL params only)")
     parser.add_argument("--output", default="output", help="Output directory")
-    parser.add_argument("--save_mesh", action="store_true", help="Save mesh as OBJ file")
-    parser.add_argument("--no_side_view", action="store_true", help="Skip side view rendering")
+    parser.add_argument("--save_mesh", action="store_true", help="Save mesh as OBJ file (image only)")
+    parser.add_argument("--no_side_view", action="store_true", help="Skip side view rendering (image only)")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"], help="Device to use")
 
     args = parser.parse_args()
 
-    process_image(
-        image_path=args.image,
-        output_dir=args.output,
-        save_mesh=args.save_mesh,
-        side_view=not args.no_side_view,
-        device=args.device,
-    )
+    if not args.image and not args.video:
+        parser.error("Either --image or --video must be provided")
+
+    if args.image and args.video:
+        parser.error("Cannot specify both --image and --video")
+
+    if args.image:
+        process_image(
+            image_path=args.image,
+            output_dir=args.output,
+            save_mesh=args.save_mesh,
+            side_view=not args.no_side_view,
+            device=args.device,
+        )
+    else:
+        process_video(
+            video_path=args.video,
+            output_dir=args.output,
+            device=args.device,
+        )
 
 
 if __name__ == "__main__":

@@ -4,3 +4,4 @@ pyrender
 trimesh
 pillow
 ultralytics
+tqdm
